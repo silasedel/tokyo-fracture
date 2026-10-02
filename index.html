@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Tokyo Fracture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /*
+   * One small system, used everywhere: warm white on near-black, a single
+   * signal red, and the Japan Meteorological Agency's own warning colours —
+   * yellow for an advisory, red for a warning, purple for an emergency — for
+   * anything the city is doing to you.
+   */
+  :root{
+    --fg:#f0eee8; --fg2:#bebcb5; --mute:#8a8c8f; --faint:#5a5d62;
+    --line:rgba(240,238,232,.13); --line2:rgba(240,238,232,.3);
+    --bg:#08090b; --panel:rgba(11,12,14,.82);
+    --red:#e8392f; --adv:#f2e700; --warn:#ff2800; --emer:#aa00aa; --water:#62bbff;
+    --sans:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+    --cond:'IBM Plex Sans Condensed','IBM Plex Sans',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+    --jp:'Noto Sans JP','Hiragino Sans',sans-serif;
+    --ease:cubic-bezier(.2,.8,.2,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
+    font-family:var(--sans);-webkit-font-smoothing:antialiased;font-synthesis:none}
+  /* The drawing buffer is larger than the window at pixel ratios above 1, so
+     the element must be pinned to the viewport or the view ends up cropped. */
+  canvas{display:block;position:fixed;inset:0;width:100vw;height:100vh}
+  #ui{position:fixed;inset:0;pointer-events:none;z-index:10;user-select:none}
+  .hide{display:none !important}
+  .jp{font-family:var(--jp);font-weight:500;letter-spacing:.08em}
+  button{font:inherit;color:inherit}
+  kbd{font-family:var(--mono)}
+
+  /* ---------- Shared pieces ---------- */
+  .eyebrow{font:500 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--mute);
+    display:flex;align-items:center;gap:12px}
+  .eyebrow .jp{color:var(--faint);letter-spacing:.18em;font-size:11px}
+  .eyebrow::before{content:'';width:7px;height:7px;background:var(--red);flex:none}
+
+  /* The wordmark is set once and cracked once: the second word is split along
+     a shallow diagonal and its lower half has slipped. */
+  .wm{font-family:var(--cond);font-weight:700;text-transform:uppercase;line-height:.86;
+    letter-spacing:-.012em;color:var(--fg)}
+  .wm span{display:block}
+  .wm .frac{position:relative;color:transparent}
+  .wm .frac::before,.wm .frac::after{content:attr(data-t);position:absolute;left:0;top:0;color:var(--fg)}
+  .wm .frac::before{clip-path:polygon(0 0,100% 0,100% 47%,0 61%)}
+  .wm .frac::after{clip-path:polygon(0 61%,100% 47%,100% 100%,0 100%);transform:translate(.035em,.022em)}
+
+  .btn{pointer-events:auto;display:inline-flex;align-items:center;justify-content:space-between;gap:22px;
+    min-width:228px;padding:0 14px 0 18px;height:46px;font:600 14px/1 var(--sans);letter-spacing:.01em;
+    border:1px solid var(--line2);background:transparent;color:var(--fg);cursor:pointer;position:relative;
+    transition:background .14s,border-color .14s,color .14s}
+  .btn kbd{font:500 11px/1 var(--mono);padding:4px 6px;border:1px solid currentColor;opacity:.55;border-radius:2px}
+  .btn:hover{border-color:var(--fg)}
+  .btn.primary{background:var(--fg);border-color:var(--fg);color:#0b0c0e}
+  .btn.primary::before{content:'';position:absolute;left:-1px;top:-1px;bottom:-1px;width:0;background:var(--red);
+    transition:width .16s var(--ease)}
+  .btn.primary:hover{background:#fff}
+  .btn.primary:hover::before{width:5px}
+  .btn.link{min-width:0;border-color:transparent;padding:0 4px;color:var(--fg2);font-weight:500}
+  .btn.link:hover{color:var(--fg);border-color:transparent}
+
+  .panel{position:absolute;left:clamp(28px,7vw,120px);top:50%;transform:translateY(-50%);
+    width:min(560px,calc(100vw - 56px));max-height:calc(100vh - 40px);overflow-y:auto;scrollbar-width:none;
+    pointer-events:auto}
+  .panel::-webkit-scrollbar{display:none}
+
+  /* Dark from the left, clear on the right: the city stays in view. */
+  .scrim{position:absolute;inset:0;background:
+    linear-gradient(90deg,rgba(8,9,11,.93) 0%,rgba(8,9,11,.84) 34%,rgba(8,9,11,.4) 64%,rgba(8,9,11,.12) 100%),
+    linear-gradient(0deg,rgba(8,9,11,.6) 0%,rgba(8,9,11,0) 30%)}
+
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .stagger>*{animation:rise .6s var(--ease) both}
+  .stagger>*:nth-child(2){animation-delay:.05s}
+  .stagger>*:nth-child(3){animation-delay:.1s}
+  .stagger>*:nth-child(4){animation-delay:.15s}
+  .stagger>*:nth-child(5){animation-delay:.2s}
+  .stagger>*:nth-child(6){animation-delay:.25s}
+  .stagger>*:nth-child(7){animation-delay:.3s}
+
+  /* ---------- Loading ---------- */
+  #loader{position:fixed;inset:0;z-index:100;background:var(--bg)}
+  #loader .lw{position:absolute;left:clamp(28px,7vw,120px);bottom:clamp(40px,12vh,120px)}
+  #loader .wm{font-size:clamp(40px,6vw,76px)}
+  #loader .lrow{display:flex;align-items:center;gap:16px;margin-top:30px}
+  #bar{width:min(300px,50vw);height:2px;background:var(--line);overflow:hidden}
+  #bar i{display:block;height:100%;width:0%;background:var(--fg)}
+  #lpct{font:500 12px/1 var(--mono);color:var(--fg2);font-variant-numeric:tabular-nums;min-width:40px}
+  #ltext{margin-top:12px;font:400 12px/1 var(--mono);color:var(--mute);letter-spacing:.02em}
+  #loader .vjp{right:clamp(24px,4vw,56px)}
+
+  .vjp{position:absolute;top:50%;transform:translateY(-50%);writing-mode:vertical-rl;
+    font:500 13px/1 var(--jp);letter-spacing:.9em;color:var(--faint)}
+
+  /* ---------- Menu ---------- */
+  #menu{position:fixed;inset:0;z-index:90}
+  #menu .wm{font-size:clamp(58px,8.6vw,128px);margin-top:26px}
+  #menu .rule{width:64px;height:3px;background:var(--red);margin-top:30px}
+  #menu .lede{margin-top:22px;max-width:440px;font:400 15.5px/1.6 var(--sans);color:var(--fg2)}
+  #menu .lede b{color:var(--fg);font-weight:600}
+  #menu .actions{margin-top:34px;display:flex;align-items:center;gap:14px}
+  #menu .controls{margin-top:46px;max-width:520px}
+  .ctl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 32px;margin-top:16px}
+  .ctl div{display:flex;align-items:baseline;gap:12px;font:400 13px/1.35 var(--sans);color:var(--fg2)}
+  .ctl kbd{flex:none;min-width:74px;font:500 11.5px/1 var(--mono);color:var(--fg);letter-spacing:.02em}
+  #menu .vjp{right:clamp(24px,4vw,56px);color:rgba(240,238,232,.34)}
+  #menu .status{position:absolute;left:clamp(28px,7vw,120px);right:clamp(28px,7vw,120px);bottom:26px;
+    display:flex;gap:28px;font:400 11px/1 var(--mono);letter-spacing:.06em;color:var(--faint);text-transform:uppercase}
+  #menu .status b{color:var(--mute);font-weight:500}
+  #menu .status .r{margin-left:auto}
+
+  /* ---------- HUD ---------- */
+  #hud{position:absolute;inset:0;opacity:0;transition:opacity .4s ease;
+    text-shadow:0 1px 2px rgba(0,0,0,.55)}
+  /* A faint band of shade along the top and bottom edges keeps small type
+     readable against a white sky or a sunlit wall. */
+  #hud::before,#hud::after{content:'';position:absolute;left:0;right:0;height:150px;pointer-events:none;z-index:-1}
+  #hud::before{top:0;background:linear-gradient(180deg,rgba(0,0,0,.3),rgba(0,0,0,0))}
+  #hud::after{bottom:0;background:linear-gradient(0deg,rgba(0,0,0,.32),rgba(0,0,0,0))}
+
+  #corner{position:absolute;left:28px;top:24px}
+  #tval{font:500 34px/1 var(--mono);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+  #tlabel{margin-top:8px;font:500 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
+  #tlabel .jp{margin-left:6px;font-size:10px;color:var(--faint)}
+  #phase{margin-top:14px;display:flex;align-items:center;gap:9px;font:600 12px/1 var(--cond);
+    letter-spacing:.08em;text-transform:uppercase;color:var(--fg)}
+  #phase i{width:8px;height:8px;background:var(--fg2);box-shadow:0 0 0 1px rgba(0,0,0,.3)}
+  #phase .jp{font-size:11px;color:var(--mute);font-weight:500}
+  #phase.adv i{background:var(--adv)} #phase.warn i{background:var(--warn)} #phase.emer i{background:var(--emer)}
+  #fps{margin-top:14px;font:400 10px/1.4 var(--mono);color:var(--faint);max-width:260px}
+
+  #compass{position:absolute;top:18px;left:50%;transform:translateX(-50%);width:min(360px,52vw);height:30px;
+    overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 20%,#000 80%,transparent);
+    mask-image:linear-gradient(90deg,transparent,#000 20%,#000 80%,transparent)}
+  #compass .strip{position:absolute;left:0;top:0;height:30px;will-change:transform}
+  #compass .t{position:absolute;bottom:14px;width:1px;background:rgba(240,238,232,.45);height:5px}
+  #compass .t.m{height:9px;background:rgba(240,238,232,.75)}
+  #compass .l{position:absolute;top:18px;transform:translateX(-50%);font:500 10px/1 var(--mono);
+    color:var(--fg2);letter-spacing:.04em}
+  #compass .l.c{color:var(--fg);font-weight:600}
+  #compass .caret{position:absolute;left:50%;top:0;width:2px;height:12px;margin-left:-1px;background:var(--red)}
+
+  #alerts{position:absolute;top:66px;left:50%;transform:translateX(-50%);width:min(500px,86vw);
+    display:flex;flex-direction:column;gap:8px}
+  .alert{display:grid;grid-template-columns:5px 1fr;background:var(--panel);text-shadow:none;
+    border:1px solid var(--line);animation:drop .28s var(--ease) both;overflow:hidden}
+  .alert>i{background:var(--warn)}
+  .alert.adv>i{background:var(--adv)} .alert.emer>i{background:var(--emer)}
+  .alert .b{padding:11px 16px 12px}
+  .alert .h{display:flex;align-items:baseline;gap:12px}
+  .alert .h .jp{font:700 13px/1 var(--jp);letter-spacing:.06em;color:var(--fg)}
+  .alert .h .en{font:600 13px/1 var(--cond);letter-spacing:.08em;text-transform:uppercase;color:var(--fg)}
+  .alert .s{margin-top:6px;font:400 12.5px/1.4 var(--sans);color:var(--fg2)}
+  /* An earthquake arrives the way it does on Japanese television. */
+  .alert.eew{grid-template-columns:1fr;border-color:var(--red)}
+  .alert.eew>i{display:none}
+  .alert.eew .h{background:var(--red);margin:-11px -16px 0;padding:10px 16px}
+  .alert.eew .h .jp,.alert.eew .h .en{color:#fff}
+  .alert.eew .h .dot{margin-left:auto;width:8px;height:8px;border-radius:50%;background:#fff;
+    animation:blink .5s steps(1) 6}
+  .alert.eew .s{margin-top:10px}
+  @keyframes drop{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+  @keyframes blink{50%{opacity:0}}
+
+  #hazards{position:absolute;right:28px;top:24px;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+  .hz{display:flex;align-items:center;gap:10px;height:26px;padding:0 11px 0 0;background:var(--panel);
+    text-shadow:none;animation:drop .28s var(--ease) both}
+  .hz b{align-self:stretch;display:flex;align-items:center;padding:0 7px;font:700 10.5px/1 var(--jp);
+    letter-spacing:.04em;background:var(--warn);color:#fff}
+  .hz.adv b{background:var(--adv);color:#141414} .hz.emer b{background:var(--emer)}
+  .hz .en{font:600 12px/1 var(--cond);letter-spacing:.08em;text-transform:uppercase}
+  .hz .jp{font:500 11px/1 var(--jp);color:var(--mute)}
+
+  #crosshair{position:absolute;left:50%;top:50%;width:26px;height:26px;transform:translate(-50%,-50%)}
+  #crosshair .d{position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;border-radius:50%;
+    background:var(--fg);box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+  #crosshair .br{position:absolute;inset:0;opacity:0;transform:scale(1.35);transition:transform .16s var(--ease),opacity .16s;
+    filter:drop-shadow(0 0 1px rgba(0,0,0,.7));
+    background:
+      linear-gradient(var(--fg),var(--fg)) top left/7px 1.5px no-repeat,
+      linear-gradient(var(--fg),var(--fg)) top left/1.5px 7px no-repeat,
+      linear-gradient(var(--fg),var(--fg)) top right/7px 1.5px no-repeat,
+      linear-gradient(var(--fg),var(--fg)) top right/1.5px 7px no-repeat,
+      linear-gradient(var(--fg),var(--fg)) bottom left/7px 1.5px no-repeat,
+      linear-gradient(var(--fg),var(--fg)) bottom left/1.5px 7px no-repeat,
+      linear-gradient(var(--fg),var(--fg)) bottom right/7px 1.5px no-repeat,
+      linear-gradient(var(--fg),var(--fg)) bottom right/1.5px 7px no-repeat}
+  #crosshair.active .br{opacity:.95;transform:scale(1)}
+  #crosshair .ch{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;
+    border-radius:50%;opacity:0;transition:opacity .12s ease;
+    background:conic-gradient(from 0deg,var(--fg) 0turn,var(--fg) var(--c,0turn),rgba(240,238,232,.18) var(--c,0turn));
+    -webkit-mask:radial-gradient(circle,transparent 18.5px,#000 19px,#000 21px,transparent 21.5px);
+    mask:radial-gradient(circle,transparent 18.5px,#000 19px,#000 21px,transparent 21.5px)}
+  #crosshair.charging .ch{opacity:1}
+  #crosshair.charging .br{opacity:0}
+
+  #prompt{position:absolute;left:50%;top:calc(50% + 32px);transform:translateX(-50%);display:flex;gap:16px;
+    white-space:nowrap;font:500 12.5px/1 var(--sans);color:var(--fg);text-shadow:0 1px 3px rgba(0,0,0,.85)}
+  #prompt>span{display:inline-flex;align-items:center;gap:7px}
+  #prompt kbd{font:500 10.5px/1 var(--mono);padding:3px 5px;border:1px solid rgba(240,238,232,.6);border-radius:2px;
+    background:rgba(10,11,13,.45);text-shadow:none}
+  #prompt b{font:500 12px/1 var(--mono)}
+
+  #vitals{position:absolute;left:28px;bottom:26px;width:250px;display:flex;flex-direction:column;gap:11px}
+  .vrow{display:grid;grid-template-columns:64px 1fr 28px;align-items:center;gap:12px;transition:opacity .3s}
+  .vrow .k{font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mute)}
+  .vrow .bar{position:relative;height:4px;background:rgba(240,238,232,.16);overflow:hidden}
+  .vrow .bar i{position:absolute;inset:0;background:var(--fg);transform-origin:left;transition:transform .12s linear}
+  .vrow .v{font:500 12px/1 var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+  #stam .bar i{background:var(--fg2)} #stam .v{color:var(--fg2)}
+  #breath .bar i{background:var(--water)}
+  #hp.low .bar i{background:var(--red)} #hp.low .v,#hp.low .k{color:var(--red)}
+
+  #carry{position:absolute;right:28px;bottom:26px;text-align:right;min-width:200px}
+  #carry .st{font:500 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
+  #carry .st.on{color:var(--fg)}
+  #carry .nm{margin-top:7px;font:600 18px/1.1 var(--sans)}
+  #carry .nm::first-letter{text-transform:uppercase}
+  #carry .mt{margin-top:6px;font:400 12px/1 var(--mono);color:var(--fg2)}
+
+  #dmg{position:absolute;inset:0;opacity:0;pointer-events:none;transition:opacity .22s;
+    background:radial-gradient(ellipse at center,transparent 45%,rgba(160,18,10,.62) 100%)}
+
+  #toast{position:absolute;left:50%;bottom:112px;transform:translateX(-50%);max-width:70vw;text-align:center;
+    font:500 12.5px/1.4 var(--sans);color:var(--fg);background:var(--panel);border:1px solid var(--line);
+    padding:8px 14px;opacity:0;transition:opacity .3s;text-shadow:none}
+
+  /* ---------- Death ---------- */
+  #death,#pause{position:fixed;inset:0;pointer-events:auto}
+  #death{z-index:95}
+  #death .scrim{background:linear-gradient(90deg,rgba(8,9,11,.95) 0%,rgba(8,9,11,.88) 45%,rgba(8,9,11,.55) 100%)}
+  #death h2{margin-top:24px;font:700 clamp(34px,4.2vw,54px)/1 var(--cond);letter-spacing:-.005em}
+  #death .cause{margin-top:14px;display:flex;align-items:center;gap:10px;font:500 15px/1.3 var(--sans);color:var(--red)}
+  #death .cause::before{content:'';width:8px;height:8px;background:var(--red)}
+  #death .time{margin-top:40px;display:flex;align-items:flex-end;gap:22px}
+  #dtime{font:500 clamp(64px,8.5vw,112px)/.84 var(--mono);letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+  #death .tl{padding-bottom:4px;display:flex;flex-direction:column;gap:8px}
+  #death .tl span{font:500 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
+  #dbest{font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--fg2)}
+  #dbest.new{color:#fff;background:var(--red);padding:5px 7px;align-self:flex-start}
+  #stats{margin-top:34px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line)}
+  #stats div{padding:15px 12px 14px 0;border-bottom:1px solid var(--line)}
+  #stats b{display:block;font:500 21px/1 var(--mono);font-variant-numeric:tabular-nums}
+  #stats span{display:block;margin-top:8px;font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mute)}
+  #death .actions{margin-top:36px;display:flex;gap:14px}
+
+  /* ---------- Pause / settings ---------- */
+  #pause{z-index:92}
+  #pause h2{margin-top:24px;font:700 clamp(38px,4.6vw,60px)/1 var(--cond);letter-spacing:-.005em}
+  #pause .actions{margin-top:30px;display:flex;gap:14px}
+  #pause .sh{margin-top:42px}
+  #settings{margin-top:12px;max-width:470px;border-top:1px solid var(--line)}
+  #pause[data-menu="1"] #settings{margin-top:34px}
+  #settings label{display:grid;grid-template-columns:1fr auto;align-items:center;column-gap:28px;min-height:44px;
+    border-bottom:1px solid var(--line);cursor:pointer}
+  #settings label>span{font:400 13.5px/1 var(--sans);color:var(--fg2)}
+  #settings label:hover>span{color:var(--fg)}
+  #settings .ctl-cell{display:flex;align-items:center;justify-content:flex-end;gap:12px}
+  #settings kbd{font:500 10.5px/1 var(--mono);padding:2px 5px;border:1px solid var(--line2);border-radius:2px;margin-left:6px}
+  #settings output{font:500 11.5px/1 var(--mono);color:var(--fg);min-width:40px;text-align:right;font-variant-numeric:tabular-nums}
+  #settings input[type=range]{-webkit-appearance:none;appearance:none;width:150px;height:18px;background:transparent;cursor:pointer}
+  #settings input[type=range]::-webkit-slider-runnable-track{height:2px;background:var(--line2)}
+  #settings input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:8px;height:16px;margin-top:-7px;
+    background:var(--fg);border:none;border-radius:1px}
+  #settings input[type=range]::-moz-range-track{height:2px;background:var(--line2)}
+  #settings input[type=range]::-moz-range-thumb{width:8px;height:16px;background:var(--fg);border:none;border-radius:1px}
+  #settings input[type=checkbox]{-webkit-appearance:none;appearance:none;width:32px;height:18px;border:1px solid var(--line2);
+    position:relative;cursor:pointer;transition:background .14s,border-color .14s}
+  #settings input[type=checkbox]::before{content:'';position:absolute;left:3px;top:3px;width:10px;height:10px;
+    background:var(--fg2);transition:transform .16s var(--ease),background .14s}
+  #settings input[type=checkbox]:checked{background:var(--fg);border-color:var(--fg)}
+  #settings input[type=checkbox]:checked::before{transform:translateX(14px);background:#0b0c0e}
+  #settings select{-webkit-appearance:none;appearance:none;background:transparent;color:var(--fg);cursor:pointer;
+    border:1px solid var(--line2);border-radius:0;font:500 12px/1 var(--mono);padding:6px 28px 6px 10px;
+    background-image:linear-gradient(45deg,transparent 50%,var(--fg2) 50%),linear-gradient(135deg,var(--fg2) 50%,transparent 50%);
+    background-position:calc(100% - 14px) 50%,calc(100% - 10px) 50%;background-size:4px 4px;background-repeat:no-repeat}
+  #settings select option{background:#111214;color:var(--fg)}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="hud">
+    <div id="corner">
+      <div id="tval">00:00</div>
+      <div id="tlabel">Survived<span class="jp">経過</span></div>
+      <div id="phase"><i></i><span class="en">Calm</span><span class="jp">静穏</span></div>
+      <div id="fps" class="hide"></div>
+    </div>
+    <div id="compass"><div class="strip"></div><div class="caret"></div></div>
+    <div id="alerts"></div>
+    <div id="hazards"></div>
+    <div id="crosshair"><div class="br"></div><div class="ch"></div><div class="d"></div></div>
+    <div id="prompt" class="hide"></div>
+    <div id="vitals">
+      <div class="vrow" id="hp"><span class="k">Health</span><div class="bar"><i></i></div><span class="v">100</span></div>
+      <div class="vrow" id="stam"><span class="k">Stamina</span><div class="bar"><i></i></div><span class="v">100</span></div>
+      <div class="vrow" id="breath" style="opacity:0"><span class="k">Breath</span><div class="bar"><i></i></div><span class="v">100</span></div>
+    </div>
+    <div id="carry"></div>
+    <div id="dmg"></div>
+    <div id="toast"></div>
+  </div>
+</div>
+
+<div id="loader">
+  <div class="lw">
+    <div class="eyebrow">Building the city<span class="jp">東京崩壊</span></div>
+    <div class="wm" style="margin-top:22px"><span>Tokyo</span><span class="frac" data-t="Fracture">Fracture</span></div>
+    <div class="lrow"><div id="bar"><i></i></div><span id="lpct">0%</span></div>
+    <div id="ltext">initialising</div>
+  </div>
+  <div class="vjp">生き延びろ</div>
+</div>
+
+<div id="menu" class="hide">
+  <div class="scrim"></div>
+  <div class="panel stagger">
+    <div class="eyebrow">Physics disaster sandbox<span class="jp">東京崩壊</span></div>
+    <h1 class="wm"><span>Tokyo</span><span class="frac" data-t="Fracture">Fracture</span></h1>
+    <div class="rule"></div>
+    <p class="lede">No mission, no safe zone, no script. The city is a simulation of mass, water, wind,
+      fire and structure, and it is about to fail around you. <b>Stay alive as long as you can.</b></p>
+    <div class="actions">
+      <button id="play" class="btn primary"><span>Enter the city</span><kbd>Enter</kbd></button>
+      <button id="menuSettings" class="btn link">Settings</button>
+    </div>
+    <div class="controls">
+      <div class="eyebrow">Controls<span class="jp">操作</span></div>
+      <div class="ctl">
+        <div><kbd>W A S D</kbd>Move</div>
+        <div><kbd>Shift</kbd>Sprint · steady a load</div>
+        <div><kbd>Space</kbd>Jump · climb · swim up</div>
+        <div><kbd>Ctrl</kbd>Crouch · dive</div>
+        <div><kbd>Hold LMB</kbd>Pick up and carry</div>
+        <div><kbd>Wheel ↓</kbd>Wind up a throw</div>
+        <div><kbd>LMB</kbd>Hit · dig</div>
+        <div><kbd>RMB</kbd>Swing what you hold</div>
+        <div><kbd>R</kbd>Rotate what you hold</div>
+        <div><kbd>V</kbd>First · third person</div>
+        <div><kbd>M</kbd>Mute</div>
+        <div><kbd>Esc</kbd>Pause</div>
+      </div>
+    </div>
+  </div>
+  <div class="vjp">生き延びろ</div>
+  <div class="status"><span>Seed <b id="mseed">—</b></span><span><b id="mobj">—</b> objects simulated</span><span class="r">Nothing is scripted</span></div>
+</div>
+
+<div id="death" class="hide">
+  <div class="scrim"></div>
+  <div class="panel stagger">
+    <div class="eyebrow">Incident report<span class="jp">記録</span></div>
+    <h2>You did not make it.</h2>
+    <div class="cause" id="cause"></div>
+    <div class="time"><span id="dtime">00:00</span><div class="tl"><span>Time survived</span><span id="dbest"></span></div></div>
+    <div id="stats"></div>
+    <div class="actions"><button id="again" class="btn primary"><span>Try again</span><kbd>R</kbd></button></div>
+  </div>
+</div>
+
+<div id="pause" class="hide">
+  <div class="scrim"></div>
+  <div class="panel">
+    <div class="eyebrow" id="peyebrow">Paused<span class="jp">一時停止</span></div>
+    <h2 id="ptitle">Paused</h2>
+    <div class="actions"><button id="resume" class="btn primary"><span>Resume</span><kbd>Esc</kbd></button></div>
+    <div class="eyebrow sh">Settings<span class="jp">設定</span></div>
+    <div id="settings"></div>
+  </div>
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
